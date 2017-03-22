@@ -1,0 +1,7 @@
+.Rhistory
+.RData
+.DS_Store
+.directory
+.Rproj.user
+*.pdf
+*.fcs
