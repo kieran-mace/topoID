@@ -1,0 +1,146 @@
+---
+title: "Checking the quality of the Cytometry Data"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+knit: (function(inputFile, encoding) { out_dir <- '../../output/Notebook'; rmarkdown::render(inputFile,
+  encoding=encoding, output_dir=file.path(dirname(inputFile), out_dir)) })
+---
+
+```{r, message=FALSE}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(flowCore)
+```
+
+
+```{r}
+strain_meta = read.csv('../../input/meta/Strain_Meta.csv')
+row_meta = read.csv('../../input/meta/Row_Estradiol_Meta.csv')
+col_meta = read.csv('../../input/meta/Column_Progesterone_Meta.csv')
+meta = left_join(strain_meta,col_meta) %>% merge(row_meta)
+head(meta)
+```
+Now lets calculate some book keeping variables:
+
+```{r}
+meta = meta %>%
+    mutate(well_file = paste0('Specimen_001_',
+                              Row,
+                              Column,
+                              '_',
+                              Row,
+                              str_pad(Column, 2, pad = "0"),
+                              '.fcs' ),
+           pathway_path = paste0('../../input/fcs/pathway/', 
+                                 Strain,
+                                 '/',
+                                 well_file),
+           survive_path = paste0('../../input/fcs/survive/', 
+                                 Strain,
+                                 '/',
+                                 well_file))
+meta$Row = factor(meta$Row, levels=rev(levels(meta$Row)))
+meta$Column = factor(meta$Column)
+meta$Progesterone_Factor = factor(round(meta$Progesterone_Dose, digits=1))
+meta$Estradiol_Factor = factor(round(meta$Estradiol_Dose, digits=1))
+
+
+meta %>% head
+```
+# Pathway activity orientation
+Now lets write a little function to extract the median corrected FITC value for an fcs file
+```{r}
+get_summary_statistics = function(file_path){
+    path = as.character(file_path)
+    fcs <- exprs(read.FCS(path, transformation=FALSE, truncate_max_range = FALSE))
+    clean = (fcs[ ,'FSC-H'] > 0) & 
+            (fcs[ ,'SSC-H'] > 0) & 
+            (fcs[ ,'FITC-H'] > 0) & 
+            (fcs[ ,'mCherry-H'] > 0)
+    fcs = fcs[clean,]
+    fitc_norm = fcs[,'FITC-H'] / fcs[,'SSC-H']
+    out = median(log10(fitc_norm))
+    return(out)
+}
+
+meta = meta %>% 
+    mutate(fitc = Vectorize(get_summary_statistics)(pathway_path) + 1) %>%
+    group_by(Strain) %>% mutate(fitc_norm = fitc / fitc[Estradiol_Dose == 0 & Progesterone_Dose == 0] ) %>% ungroup()
+```
+
+Now lets plot the plates to see their structure:
+
+```{r}
+meta %>% ggplot(aes(x=Column,y=Row, fill = fitc_norm)) + geom_tile() + facet_grid(Repressor~Activator)
+```
+
+It is clear that the activity of the pathway goes up when we traverse the plate from right to left (activator dimension). 
+It is also clear that the activity of the pathway goes down when traverse the plate from bottom to top (repressor dimension)
+this is not typical of how Andres and I do dose responses, however it may be how Elham did it.
+
+One thing I can see from this data is that this patturn is consistant! which is a relief!
+
+# Survival plate
+
+First thing to do is to establish the correct cutoff. I'll first do this by just plotting. Maybe a mixed gausian mixture model might work as well.
+
+```{r}
+get_fcs = function(path){
+    fcs <- exprs(read.FCS(path, transformation=FALSE, truncate_max_range = FALSE))
+    return(fcs)
+}
+
+fcs = lapply(meta$survive_path, get_fcs)
+fcs = do.call("rbind", fcs)
+hist(log10(fcs[,'mCherry-H']))
+```
+It seems that 10^3 is a perfectly reasonable cutoff between dead and alive cells
+Lets quatify the survival for all the plates.
+
+```{r}
+percent_alive = function(path, lim){
+    fcs <- exprs(read.FCS(path, transformation=FALSE, truncate_max_range = FALSE))
+    mcherry = fcs[,"mCherry-H"]
+    return(sum(mcherry<lim)/length(mcherry))
+}
+meta = meta %>% mutate(percent_alive = Vectorize(percent_alive)(survive_path, 10^3))
+```
+
+Lets take a look
+
+```{r}
+meta %>% ggplot(aes(x=Column,y=Row, fill = percent_alive)) + geom_tile() + facet_grid(Repressor~Activator)
+```
+
+Looks just like opposite of the activity. So survivability negativly corrolates with pathway output?
+
+```{r}
+meta %>% ggplot(aes(x=fitc_norm, y=percent_alive, color = Activator)) + geom_point()
+```
+
+It also seems that MKK1 is far more toxic at high levels than RHO1, lets also check for the repressors:
+
+```{r}
+meta %>% ggplot(aes(x=fitc_norm, y=percent_alive, color = Repressor)) + geom_point()
+```
+
+It seems like MSN2 is a very powerful repressor of pathway output, and therefore resuces a large chunk of cell death.
+
+# Recreating Raj's Plots
+```{r}
+meta %>% ggplot(
+        aes(x = Progesterone_Factor, 
+            y=fitc_norm, 
+            color = Estradiol_Factor, 
+            group = Estradiol_Factor)) + 
+    geom_line() + 
+    facet_grid(Repressor~Activator) + 
+    xlab('Progesteron (nM)') + 
+    ylab('Pathway Activity') + 
+    theme(axis.text.x = element_text(face="bold",size=4, angle=270)) + 
+    guides(color=guide_legend(title='Estradiol (nM)'))
+
+```
