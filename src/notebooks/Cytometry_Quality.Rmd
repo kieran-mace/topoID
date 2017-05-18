@@ -7,7 +7,7 @@ output:
 knit: (function(inputFile, encoding) { out_dir <- '../../output/Notebook'; rmarkdown::render(inputFile,
   encoding=encoding, output_dir=file.path(dirname(inputFile), out_dir)) })
 ---
-@TODO modify analysis to look at expression and event count. 
+
 ```{r, message=FALSE}
 library(dplyr)
 library(stringr)
@@ -78,14 +78,27 @@ get_num = function(file_path){
 }
 
 meta = meta %>% 
-    mutate(fitc = Vectorize(get_summary_statistics)(pathway_path) + 1, num = Vectorize(get_num)(pathway_path)) #%>%
-    #group_by(Strain) %>% mutate(fitc_norm = fitc / fitc[Estradiol_Dose == 0 & Progesterone_Dose == 0] ) %>% ungroup()
+    mutate(fitc = Vectorize(get_summary_statistics)(pathway_path) + 1, 
+           num = Vectorize(get_num)(pathway_path)) %>%
+    group_by(Strain) %>% mutate(fitc_norm = fitc / fitc[Estradiol_Dose == 0 & Progesterone_Dose == 0] ) %>% ungroup()
 ```
 
 Now lets plot the plates to see their structure:
 
 ```{r}
-meta %>% ggplot(aes(x=Column,y=Row, fill = num)) + geom_tile() + facet_grid(Repressor~Activator)
+meta %>% ggplot(aes(x=Column,
+                    y=Row, 
+                    fill = fitc_norm)) + 
+    geom_tile() + 
+    facet_grid(Repressor~Activator) +
+    ggtitle('Expression')
+
+meta %>% ggplot(aes(x=Column,
+                    y=Row, 
+                    fill = num)) + 
+    geom_tile() + 
+    facet_grid(Repressor~Activator) +
+    ggtitle('Events')
 ```
 
 It is clear that the activity of the pathway goes up when we traverse the plate from right to left (activator dimension). 
