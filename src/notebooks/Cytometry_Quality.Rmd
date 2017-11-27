@@ -95,7 +95,7 @@ meta %>% ggplot(aes(x=Column,
 
 meta %>% ggplot(aes(x=Column,
                     y=Row, 
-                    fill = num)) + 
+                    fill = log10(num))) + 
     geom_tile() + 
     facet_grid(Repressor~Activator) +
     ggtitle('Events')
